@@ -1,0 +1,12 @@
+time taken in ns = 2904251591
+
+ Performance counter stats for './false_sharing1':
+
+        80,730,362      L1-dcache-load-misses                                                 
+
+       2.906293395 seconds time elapsed
+
+       5.590834000 seconds user
+       0.000000000 seconds sys
+
+
