@@ -49,7 +49,7 @@ public:
 
     // Producer-side: enqueue a value. Safe to call from any thread.
     // Returns void; cannot fail (unbounded queue, allocation may throw).
-    void enqueue(T& value){
+    void enqueue(const T& value){
         Node* new_node = new Node();
         new_node->data = value;
         new_node->next.store(nullptr,std::memory_order_relaxed);

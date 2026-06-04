@@ -13,14 +13,14 @@ private:
         std::atomic<Node *> next;
     };
     Node *stub;
-    std::atomic<Node *> head;
-    std::atomic<Node *> tail;
+    alignas(64) std::atomic<Node *> head;
+    alignas(64) std::atomic<Node *> tail;
 
 public:
     MPSC()
     {
         stub = new Node();
-        stub->next.load(nullptr, std::memory_order_relaxed);
+        stub->next.store(nullptr, std::memory_order_relaxed);
         head.store(stub, std::memory_order_relaxed);
         tail.store(stub, std::memory_order_relaxed);
     }
@@ -31,7 +31,7 @@ public:
         delete node;
         node=nullptr;
     }
-    void enqueue(T val)
+    void enqueue(const T&  val)
     {
         Node *new_node = new Node();
         new_node->data = val;

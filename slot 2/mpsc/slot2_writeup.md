@@ -47,3 +47,9 @@ Sometimes the coherence cost exceeds the parallelism benefit, and the "more para
 For a single contended cache line — which is exactly what a queue's tail pointer is — adding cores past a small number often makes total throughput worse, not better, because every core now fights for the one line. 
 This is the fundamental scaling limit of any single-point-of-contention structure, and it is why MPSC queues plateau and then degrade as producer count rises.
 I measured that degradation;
+
+the MPSC queue I implemented is not completely lock free as we are using the new and delete in the hot path. which internally used locks so its for upcoming improvements
+TBD 
+remove new/delete from the hot path 
+
+queue is lock-free in its logic but not end-to-end, because allocation can block

@@ -14,3 +14,7 @@ along with the C1 which find the old_head now checking for the old->next
 if P1 updated its values it must reflect in C1 so need release in p1 and acquire in C1 
 
 C1 is the only thread operating on the head so there is no need to put any ordering relaxed will be fine 
+
+
+in deque I used memory_order_relaxed its because I was not able to find the acquire partner corresponding to if I use release here 
+head.store(new_head, std::memory_order_relaxed)
