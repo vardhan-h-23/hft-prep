@@ -1,0 +1,503 @@
+// custom made MPSC queue in mpsc_queue.hpp
+//with 20 producer and 1 consumer 
+
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 973
+p99 latency = 262
+p90 latency = 176
+p50 latency = 29
+Max latency = 57016319
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 674
+p99 latency = 265
+p90 latency = 182
+p50 latency = 29
+Max latency = 57016319
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1124
+p99 latency = 292
+p90 latency = 182
+p50 latency = 30
+Max latency = 228065279
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1304
+p99 latency = 274
+p90 latency = 181
+p50 latency = 29
+Max latency = 81068031
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1147
+p99 latency = 327
+p90 latency = 182
+p50 latency = 30
+Max latency = 363069439
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1146
+p99 latency = 343
+p90 latency = 183
+p50 latency = 29
+Max latency = 321126399
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1251
+p99 latency = 302
+p90 latency = 182
+p50 latency = 29
+Max latency = 312737791
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1181
+p99 latency = 302
+p90 latency = 182
+p50 latency = 29
+Max latency = 321126399
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1216
+p99 latency = 317
+p90 latency = 181
+p50 latency = 29
+Max latency = 318504959
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1172
+p99 latency = 262
+p90 latency = 181
+p50 latency = 30
+Max latency = 294125567
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1406
+p99 latency = 322
+p90 latency = 182
+p50 latency = 30
+Max latency = 239468543
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1167
+p99 latency = 273
+p90 latency = 182
+p50 latency = 29
+Max latency = 57016319
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1048
+p99 latency = 281
+p90 latency = 182
+p50 latency = 29
+Max latency = 57016319
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1259
+p99 latency = 326
+p90 latency = 184
+p50 latency = 29
+Max latency = 60686335
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1142
+p99 latency = 266
+p90 latency = 179
+p50 latency = 29
+Max latency = 272105471
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1211
+p99 latency = 327
+p90 latency = 181
+p50 latency = 30
+Max latency = 269221887
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1135
+p99 latency = 317
+p90 latency = 182
+p50 latency = 30
+Max latency = 339214335
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 553
+p99 latency = 250
+p90 latency = 181
+p50 latency = 29
+Max latency = 57016319
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1462
+p99 latency = 297
+p90 latency = 182
+p50 latency = 30
+Max latency = 411303935
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for producer
+─────────────────────────────────
+p99.9 latency = 1195
+p99 latency = 283
+p90 latency = 182
+p50 latency = 29
+Max latency = 274989055
+HDR memory : 172136
+─────────────────────────────────
+  Iterations : for consumer
+─────────────────────────────────
+p99.9 latency = 459
+p99 latency = 199
+p90 latency = 37
+p50 latency = 34
+Max latency = 24095
+HDR memory : 172136
+Hthis count is =20000000
+total time taken = 2.44716e+09ns 
+
+
+
+
+// Boost libraries MPMC queue 
+//with 20 producer and 1 consumer 
+
+Total Consumer Received Count = 20000000
+─────────────────────────────────
+  Stats for Producer ID 0
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 310 ns
+p99.9 latency = 398 ns
+Max latency   = 60030975 ns
+─────────────────────────────────
+  Stats for Producer ID 1
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 309 ns
+p99.9 latency = 395 ns
+Max latency   = 63012863 ns
+─────────────────────────────────
+  Stats for Producer ID 2
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 310 ns
+p99.9 latency = 399 ns
+Max latency   = 60030975 ns
+─────────────────────────────────
+  Stats for Producer ID 3
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 309 ns
+p99.9 latency = 398 ns
+Max latency   = 66027519 ns
+─────────────────────────────────
+  Stats for Producer ID 4
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 309 ns
+p99.9 latency = 398 ns
+Max latency   = 84017151 ns
+─────────────────────────────────
+  Stats for Producer ID 5
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 308 ns
+p99.9 latency = 398 ns
+Max latency   = 106037247 ns
+─────────────────────────────────
+  Stats for Producer ID 6
+─────────────────────────────────
+p50 latency   = 207 ns
+p99 latency   = 307 ns
+p99.9 latency = 395 ns
+Max latency   = 100007935 ns
+─────────────────────────────────
+  Stats for Producer ID 7
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 310 ns
+p99.9 latency = 398 ns
+Max latency   = 103022591 ns
+─────────────────────────────────
+  Stats for Producer ID 8
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 309 ns
+p99.9 latency = 397 ns
+Max latency   = 63012863 ns
+─────────────────────────────────
+  Stats for Producer ID 9
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 310 ns
+p99.9 latency = 401 ns
+Max latency   = 66027519 ns
+─────────────────────────────────
+  Stats for Producer ID 10
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 310 ns
+p99.9 latency = 397 ns
+Max latency   = 60030975 ns
+─────────────────────────────────
+  Stats for Producer ID 11
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 309 ns
+p99.9 latency = 397 ns
+Max latency   = 66027519 ns
+─────────────────────────────────
+  Stats for Producer ID 12
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 308 ns
+p99.9 latency = 398 ns
+Max latency   = 66027519 ns
+─────────────────────────────────
+  Stats for Producer ID 13
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 309 ns
+p99.9 latency = 398 ns
+Max latency   = 66027519 ns
+─────────────────────────────────
+  Stats for Producer ID 14
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 310 ns
+p99.9 latency = 402 ns
+Max latency   = 64028671 ns
+─────────────────────────────────
+  Stats for Producer ID 15
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 308 ns
+p99.9 latency = 395 ns
+Max latency   = 66027519 ns
+─────────────────────────────────
+  Stats for Producer ID 16
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 309 ns
+p99.9 latency = 398 ns
+Max latency   = 63012863 ns
+─────────────────────────────────
+  Stats for Producer ID 17
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 309 ns
+p99.9 latency = 395 ns
+Max latency   = 63012863 ns
+─────────────────────────────────
+  Stats for Producer ID 18
+─────────────────────────────────
+p50 latency   = 206 ns
+p99 latency   = 311 ns
+p99.9 latency = 402 ns
+Max latency   = 57049087 ns
+─────────────────────────────────
+  Stats for Producer ID 19
+─────────────────────────────────
+p50 latency   = 205 ns
+p99 latency   = 328 ns
+p99.9 latency = 430 ns
+Max latency   = 66027519 ns
+─────────────────────────────────
+  Stats for Final Consumer
+─────────────────────────────────
+p50 latency   = 207 ns
+p99 latency   = 289 ns
+p99.9 latency = 390 ns
+Max latency   = 15175 ns
+total time taken = 5.51318e+09 ns 
+
+
+// Simple queue latency measurement 
+// with 20 producer and 1 consumer 
+Total Consumer Received Count = 20000000
+─────────────────────────────────
+  Stats for Producer ID 0
+─────────────────────────────────
+p50 latency   = 437 ns
+p99 latency   = 126335 ns
+p99.9 latency = 231551 ns
+Max latency   = 9109503 ns
+─────────────────────────────────
+  Stats for Producer ID 1
+─────────────────────────────────
+p50 latency   = 334 ns
+p99 latency   = 125631 ns
+p99.9 latency = 231039 ns
+Max latency   = 3844095 ns
+─────────────────────────────────
+  Stats for Producer ID 2
+─────────────────────────────────
+p50 latency   = 451 ns
+p99 latency   = 125567 ns
+p99.9 latency = 229631 ns
+Max latency   = 7675903 ns
+─────────────────────────────────
+  Stats for Producer ID 3
+─────────────────────────────────
+p50 latency   = 326 ns
+p99 latency   = 131071 ns
+p99.9 latency = 244223 ns
+Max latency   = 8310783 ns
+─────────────────────────────────
+  Stats for Producer ID 4
+─────────────────────────────────
+p50 latency   = 430 ns
+p99 latency   = 126591 ns
+p99.9 latency = 231039 ns
+Max latency   = 9043967 ns
+─────────────────────────────────
+  Stats for Producer ID 5
+─────────────────────────────────
+p50 latency   = 438 ns
+p99 latency   = 125503 ns
+p99.9 latency = 229247 ns
+Max latency   = 6655999 ns
+─────────────────────────────────
+  Stats for Producer ID 6
+─────────────────────────────────
+p50 latency   = 444 ns
+p99 latency   = 125055 ns
+p99.9 latency = 231935 ns
+Max latency   = 6602751 ns
+─────────────────────────────────
+  Stats for Producer ID 7
+─────────────────────────────────
+p50 latency   = 325 ns
+p99 latency   = 131839 ns
+p99.9 latency = 245375 ns
+Max latency   = 11427839 ns
+─────────────────────────────────
+  Stats for Producer ID 8
+─────────────────────────────────
+p50 latency   = 418 ns
+p99 latency   = 125951 ns
+p99.9 latency = 230527 ns
+Max latency   = 9363455 ns
+─────────────────────────────────
+  Stats for Producer ID 9
+─────────────────────────────────
+p50 latency   = 440 ns
+p99 latency   = 125567 ns
+p99.9 latency = 230655 ns
+Max latency   = 6295551 ns
+─────────────────────────────────
+  Stats for Producer ID 10
+─────────────────────────────────
+p50 latency   = 320 ns
+p99 latency   = 124991 ns
+p99.9 latency = 228223 ns
+Max latency   = 6295551 ns
+─────────────────────────────────
+  Stats for Producer ID 11
+─────────────────────────────────
+p50 latency   = 332 ns
+p99 latency   = 131327 ns
+p99.9 latency = 242943 ns
+Max latency   = 11657215 ns
+─────────────────────────────────
+  Stats for Producer ID 12
+─────────────────────────────────
+p50 latency   = 300 ns
+p99 latency   = 125439 ns
+p99.9 latency = 227327 ns
+Max latency   = 6516735 ns
+─────────────────────────────────
+  Stats for Producer ID 13
+─────────────────────────────────
+p50 latency   = 336 ns
+p99 latency   = 126015 ns
+p99.9 latency = 228479 ns
+Max latency   = 3815423 ns
+─────────────────────────────────
+  Stats for Producer ID 14
+─────────────────────────────────
+p50 latency   = 442 ns
+p99 latency   = 124927 ns
+p99.9 latency = 227455 ns
+Max latency   = 6369279 ns
+─────────────────────────────────
+  Stats for Producer ID 15
+─────────────────────────────────
+p50 latency   = 330 ns
+p99 latency   = 131583 ns
+p99.9 latency = 245247 ns
+Max latency   = 9035775 ns
+─────────────────────────────────
+  Stats for Producer ID 16
+─────────────────────────────────
+p50 latency   = 337 ns
+p99 latency   = 125567 ns
+p99.9 latency = 230911 ns
+Max latency   = 6406143 ns
+─────────────────────────────────
+  Stats for Producer ID 17
+─────────────────────────────────
+p50 latency   = 431 ns
+p99 latency   = 125439 ns
+p99.9 latency = 232063 ns
+Max latency   = 6324223 ns
+─────────────────────────────────
+  Stats for Producer ID 18
+─────────────────────────────────
+p50 latency   = 322 ns
+p99 latency   = 125375 ns
+p99.9 latency = 229119 ns
+Max latency   = 6655999 ns
+─────────────────────────────────
+  Stats for Producer ID 19
+─────────────────────────────────
+p50 latency   = 327 ns
+p99 latency   = 131327 ns
+p99.9 latency = 244223 ns
+Max latency   = 14254079 ns
+─────────────────────────────────
+  Stats for Final Consumer
+─────────────────────────────────
+p50 latency   = 36 ns
+p99 latency   = 6143 ns
+p99.9 latency = 14655 ns
+Max latency   = 9043967 ns
+total time taken = 8.08849e+09 ns 

@@ -1,0 +1,10 @@
+➜  hft-prep git:(main) ✗ ./non_false_sharing     
+─────────────────────────────────
+  Iterations : 1000000
+─────────────────────────────────
+p99.9 latency = 31
+p99 latency = 17
+p90 latency = 13
+p50 latency = 13
+Max latency = 16575
+HDR memory : 172136
