@@ -1,0 +1,162 @@
+Bytes reached to machine
+NIC hardware:
+components
+PHY;
+MAC: framing, addressing, error checking
+PCIe (Peripheral Component Interconnect Express): connect NIC to the CPU and host memory
+DMA (Direct Memory Access) 
+DMA engine (or DMA Controller): actual physical hardware
+Ring Buffers (RX/TX Rings)
+Hardware Timestamping
+SmartNIC / FPGA NIC
+
+Story: 
+Market Data's Light pulses travelling through optic fiber cable hit PHY converted into digital bits
+MAC do the Timestamping, framing, addressing, error checking, 
+using DMA engine NIC bypass the kernel and via PCIe it introduce the bytes into the program's memory space in the Ring buffer etc.
+even do Data Direct I/O (DDIO) (introduce it into L3) instead of RAM, 
+the program logic process the market data and write Order info into the ring buffer the NIC pulls it directly, package it and fire it  
+
+standard NIC would wake up the OS and causing expensive context switch
+
+Kernel Bypass is Hardware-Dependent: (e.g., Solarflare/AMD using ef_vi or OpenOnload, Mellanox using DPDK/VMA). The hardware must support mapping its memory regions directly into user space.
+
+PCIe is a Major Latency Boundary: NUMA node physically closest to the PCIe slot
+
+Data Direct I/O (DDIO): DMA directly into the CPU's L3 cache
+
+Hardware Timestamps represent the "True" Time: exact moment the bit hit the wire, metric for calculating your algorithm's wire-to-wire reaction time
+
+FPGA shift: The absolute lowest latency (sub-100 nanoseconds) is achieved by putting the trading logic on an FPGA directly on the NIC, cutting the PCIe bus and CPU out of the loop entirely.
+
+
+
+
+Who allocates the ring buffer?
+C++ process allocates it, but can't use malloc() or std::vector because standard memory is virtual and can be swapped to the hard drive by the OS
+C++ process uses the kernel bypass library (like DPDK or Solarflare's ef_vi) to allocate Hugepages. 
+These are massive blocks of memory (usually 2MB or 1GB) that are locked into physical RAM.
+
+
+Who owns the descriptors?
+Most fundamental concepts about how a ring buffer works, a ring buffer is quite
+literally just an array of descriptors exact mechanism that makes kernel bypass possible 
+without locking or crashing
+
+
+Descriptors & Ring Buffer Management
+Descriptor (RX/TX Descriptor)
+Packet Buffer (mbuf / pkt_buf)
+Ownership Flag
+Polling
+Doorbell
+
+
+
+
+
+Ring Buffers are Lockless Producer-Consumer Queues: strict passing of the Ownership Flag
+Cache Line Alignment is Critical: Descriptors are deliberately sized and aligned to fit perfectly into cache lines to avoid "false sharing"
+Descriptors vs. Buffers: Descriptors (plates)  Packet Buffers (food on the plates)
+
+Hugepages Prevent TLB Misses:
+Using Hugepages means the NIC and CPU share the exact physical addresses, bypassing the OS memory manager entirely.
+
+*****Critical section to discuss:
+Batching Updates: To save latency, HFT systems rarely ring the hardware doorbell for every single order, or hand back empty RX descriptors one by one. They process them in small batches (e.g., passing back 8 empty plates at once) to reduce the overhead of crossing the PCIe bus.
+
+
+
+Interrupt Request (IRQ) signal to CPU to halt the current work and deal with some high priority event 
+Interrupt Service Routine (ISR): function or service run by the CPU in response of a IRQ
+Message Signaled Interrupts (MSI / MSI-X): The modern standard for delivering interrupts over the PCIe bus; MSI-X allows a single device to have up to 2,048 distinct interrupt vectors.
+IRQ Routing (SMP Affinity): operating system configuration (often managed via smp_affinity in Linux) that dictates exactly which CPU core is allowed to receive and process a specific hardware interrupt.
+Receive-Side Scaling (RSS): hardware feature on the NIC that hashes incoming packet; to distribute traffic across multiple distinct RX
+
+
+Core functioning:
+bytes arrives at NIC, NIC hashes a packet and puts it in RX Queue (ex if Q2 is tied to MSI-X vector 2 OS can routed to the core 4) according to the hashing 
+so MSI-x vector generate interrupt to the corresponding core [PCIe write message targeted at the CPU's Advanced Programmable Interrupt Controller (APIC).]
+
+
+
+The Role of the APIC (The Receptionist)
+APIC stands for Advanced Programmable Interrupt Controller. Think of the actual CPU core as a busy executive, and the APIC as the executive's strict receptionist sitting right outside the office door.
+
+The NIC cannot just burst into the executive's office (the core).
+
+Instead, the NIC sends a message (MSI-X) to the receptionist (the APIC).
+
+The APIC looks at the message, checks its priority, and then physically taps the executive on the shoulder to say, "Stop working on your spreadsheet, you have an urgent network packet."
+
+The End-to-End Flow (Step-by-Step)
+Here is the exact chronological sequence of what happens when data arrives:
+
+Phase 1: The Arrival (Bytes to Memory)
+
+Photons to Bytes: The packet arrives at the NIC from the exchange fiber optic cable. The NIC translates it into digital bytes.
+
+DMA Transfer: The NIC's DMA engine copies those bytes directly across the PCIe bus and writes them into the RX Ring Buffer (which sits in the server's main RAM).
+
+Status: At this exact millisecond, the data is sitting safely in RAM, but the CPU has absolutely no idea it is there.
+
+Phase 2: The Interrupt (NIC to APIC)
+4. MSI-X Fired: Because the NIC just put data in RAM, it needs to wake up the CPU. It generates an MSI-X interrupt.
+5. PCIe Memory Write: An MSI-X interrupt is not a physical wire. It is simply a tiny data message sent over the PCIe bus. The NIC writes this message to a highly specific hardware address.
+6. Arrival at APIC: That specific hardware address belongs to the Local APIC attached to a specific CPU core (determined by the OS routing rules we discussed earlier).
+
+Phase 3: The Wake-Up (APIC to CPU Core)
+7. APIC Signals Core: The APIC receives the MSI-X message. It immediately sends a physical electrical signal into the execution unit of the CPU core.
+8. Context Switch: The CPU core instantly pauses whatever user program it was running and switches into "Kernel Mode."
+
+Phase 4: The Processing (OS to Application)
+9. Running the ISR: The CPU core executes the OS's Interrupt Service Routine (ISR).
+10. Fetching the Data: The OS kernel looks at the RX Ring Buffer in RAM, sees the new packet, and pulls it out.
+11. Handing it Off: The OS processes the network protocols (like stripping away the IP and TCP/UDP headers) and copies the final payload data into your application's memory space.
+12. Application Wakes Up: Your application is notified that data is ready to be read.
+
+
+
+
+HFT Avoids Interrupts entirely on the Fast Path
+Core Isolation is Mandatory
+MSI-X Solves the Core 0 Bottleneck
+NUMA Node Locality
+Interrupt Coalescing
+
+
+
+Timer tick interrupt (the 1000Hz / 250Hz scheduling clock)
+
+isolcpus: You tell the Linux kernel, "Do not schedule any random processes on CPU Cores 4, 5, and 6." You reserve these exclusively for your trading threads.
+
+nohz_full (Tickless Kernel): You tell the kernel to run in "adaptive-ticks" mode for those specific cores. If there is only one runnable process on a CPU core (your pinned trading thread), the kernel will dynamically shut off the 1000Hz timer tick for that core.
+
+Result: The hardware APIC is silenced. The CPU stays in User Space (Ring 3) indefinitely. Zero OS Jitter from the scheduling clock.
+
+
+
+
+
+SMI (System Management Interrupt, firmware-level, invisible to OS)
+
+
+
+BIOS/UEFI Tuning: HFT engineers aggressively disable hardware features in the BIOS. They disable power management (C-states/P-states), thermal throttling, and legacy USB support to remove the reasons an SMI would fire.
+
+Hardware Selection: HFT firms often buy specialized servers with custom "HFT-optimized" BIOS profiles that explicitly strip out heavy BMC polling routines to minimize SMM transitions.
+
+Measurement (The TSC): Because the OS can't see it, HFT applications constantly read the CPU's hardware Time Stamp Counter (rdtsc instruction). If the delta between two sequential instructions suddenly jumps by 50,000 cycles with no OS context switch, the application knows it was just hit by an SMI.
+
+
+
+
+
+The HFT Solution: The Housekeeping Core
+To protect critical paths, HFT systems implement strict IRQ steering.
+
+The Default Mask: Engineers modify the default IRQ affinity mask in the OS (/proc/irq/default_smp_affinity) so that by default, no new device is ever allowed to interrupt a trading core.
+
+Dedicated Housekeeping Cores: Server architectures are partitioned. Cores 0 and 1 might be designated as "Housekeeping Cores". All OS tasks, SSH sessions, disk I/O, and management network IRQs are forced onto these cores.
+
+Surgical NIC Pinning: For the actual trading Network Interface Card (e.g., Solarflare or Mellanox), the receive (Rx) and transmit (Tx) hardware queues are carefully mapped. The IRQs for the market data queues are pinned strictly to the specific cores assigned to process market data, keeping the order execution core entirely unbothered.

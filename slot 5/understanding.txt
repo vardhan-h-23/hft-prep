@@ -1,0 +1,173 @@
+slot 5
+Day 1: Build bottom-up understanding by building a thing.
+Write a UDP echo server in C++ on your laptop. Raw sockets, not boost::asio. The server receives a UDP packet, timestamps the receive (using clock_gettime CLOCK_MONOTONIC_RAW — you already know this from Slot 1), echoes it back, timestamps the send. The client sends 100k packets, records round-trip times, feeds them into your bench_harness HdrHistogram infrastructure from Slot 1. This gives you a baseline latency distribution on the kernel path.
+Then answer these questions from measurement, not from reading: what does the p50 look like? What does the p99 look like? What's the ratio? Where is the jitter coming from? Use perf stat on the server process — you already know how from Slot 1. Count context switches, page faults, cache misses. Use cat /proc/interrupts before and after to see which IRQs hit your core.
+Day 1 exit criteria: UDP echo server compiles and runs. HdrHistogram latency distribution printed. perf stat output saved. /proc/interrupts diff saved. All in the hft-prep repo.
+
+
+
+perf stat -e context-switches,page-faults,cache-misses ./server
+
+
+─────────────────────────────────
+  Iterations : 1000000
+─────────────────────────────────
+p99.9 latency = 17439
+p99 latency = 11847
+p90 latency = 5675
+p50 latency = 4427
+Max latency = 93439
+HDR memory : 172136
+➜  slot 5 git:(main) ✗ lscpu -e
+CPU NODE SOCKET CORE L1d:L1i:L2:L3 ONLINE    MAXMHZ   MINMHZ      MHZ
+  0    0      0    0 0:0:0:0          yes 2600.0000 800.0000 2600.016
+  1    0      0    1 1:1:1:0          yes 2600.0000 800.0000  800.000
+  2    0      0    2 2:2:2:0          yes 2600.0000 800.0000 2600.775
+  3    0      0    3 3:3:3:0          yes 2600.0000 800.0000 2600.161
+  4    0      0    4 4:4:4:0          yes 2600.0000 800.0000 2600.289
+  5    0      0    5 5:5:5:0          yes 2600.0000 800.0000 2600.062
+  6    0      0    0 0:0:0:0          yes 2600.0000 800.0000 2600.064
+  7    0      0    1 1:1:1:0          yes 2600.0000 800.0000  800.000
+  8    0      0    2 2:2:2:0          yes 2600.0000 800.0000 2600.336
+  9    0      0    3 3:3:3:0          yes 2600.0000 800.0000 2600.098
+ 10    0      0    4 4:4:4:0          yes 2600.0000 800.0000  800.000
+ 11    0      0    5 5:5:5:0          yes 2600.0000 800.0000 2600.061
+➜  slot 5 git:(main) ✗ taskset -c 2 ./server
+─────────────────────────────────
+  Iterations : 1000000
+─────────────────────────────────
+p99.9 latency = 19119
+p99 latency = 11951
+p90 latency = 5451
+p50 latency = 4427
+Max latency = 95871
+HDR memory : 172136
+➜  slot 5 git:(main) ✗ taskset -c 1 ./server
+─────────────────────────────────
+  Iterations : 1000000
+─────────────────────────────────
+p99.9 latency = 22687
+p99 latency = 11279
+p90 latency = 5579
+p50 latency = 4587
+Max latency = 113983
+HDR memory : 172136
+➜  slot 5 git:(main) ✗ 
+
+
+After isolcpus and nohz_full
+
+Performance counter stats for './server':
+
+            26,928      context-switches                                                      
+               179      page-faults                                                           
+            89,555      cache-misses                                                          
+
+       3.617402732 seconds time elapsed
+
+       0.022588000 seconds user
+       0.158121000 seconds sys
+
+─────────────────────────────────
+  Iterations : 1000000
+─────────────────────────────────
+p99.9 latency = 56639
+p99 latency = 21967
+p90 latency = 7999
+p50 latency = 3387
+Max latency = 118591
+HDR memory : 172136
+
+ Performance counter stats for 'system wide':
+
+                 5      irq_vectors:local_timer_entry                                         
+                 5      irq_vectors:local_timer_exit                                          
+            64,038      cs                                                                    
+                 0      cpu-migrations                                                        
+
+       4.187674675 seconds time elapsed
+
+
+─────────────────────────────────
+  Iterations : 1000000
+─────────────────────────────────
+p99.9 latency = 35487
+p99 latency = 19423
+p90 latency = 6483
+p50 latency = 3149
+Max latency = 103871
+HDR memory : 172136
+
+ Performance counter stats for 'system wide':
+
+                 1      irq_vectors:local_timer_entry                                         
+                 1      irq_vectors:local_timer_exit                                          
+            61,872      cs                                                                    
+                 0      cpu-migrations                                                        
+
+       6.474884207 seconds time elapsed
+
+
+
+
+Your sendto() → socket layer → UDP layer → IP layer → routing decision → loopback interface (lo) → IP layer → UDP layer → socket layer → destination socket receive queue → your recvfrom()
+
+
+That is real kernel networking code executing. Real sk_buff allocations. Real softirq processing. The packet passes through netfilter hooks, gets checksummed, gets queued
+
+
+UDP layer
+IP layer
+routing decision
+loopback interface (lo)
+socket layer
+destination socket receive queue
+recvfrom()
+
+
+
+NIC receives frame → DMA writes to ring buffer in kernel memory → NIC raises hardware interrupt → interrupt handler schedules softirq → softirq (NET_RX_SOFTIRQ) processes packets from ring buffer → socket buffer (sk_buff) allocated → packet delivered to socket receive queue → your recv() 
+
+
+
+
+
+
+Block A — The packet receive path. (~3–4 hours)
+This is the chain you already have. The goal is to be able to draw it on a whiteboard with each transition labeled. Topic sequence:
+NIC hardware (PHY/MAC layer, what arrives) → DMA engine and ring buffer (what is a ring buffer, who allocates it, who owns the descriptors) → hardware interrupt + IRQ routing (which core, MSI-X vectors) → NAPI and softirq (why polling replaced pure interrupts, NET_RX_SOFTIRQ, ksoftirqd) → sk_buff allocation (what an sk_buff is, why it's expensive) → protocol processing (IP, UDP, checksumming) → socket receive queue (per-socket buffer, SO_RCVBUF) → recv() syscall and the kernel→user copy.
+
+
+The single best source for this, by a wide margin: Joe Damato's "Monitoring and Tuning the Linux Networking Stack: Receiving Data" on the packagecloud blog. It walks the path with kernel source line numbers. Read it once for shape, then once with notes. Skip the parts about tunable sysctls on first pass — you want the path, not the knobs.
+
+Supplementary, only if Damato leaves you confused on a specific step: LWN's "A JIT for packets" (for the XDP / pre-stack hook context) and Cloudflare's "Why we use the Linux kernel's TCP stack" (good for the philosophy of why this thing is shaped the way it is).
+
+Deliverable: a single-page diagram in your notes — boxes for each step, arrows labeled with the data structure that crosses, a column on the right with the typical latency contribution of each step (µs or ns).
+
+Block B — The noise sources on an isolated core. (~2–3 hours)
+This is your Q2 Part A gap from the original diagnostic interview, where you got two out of five. The right list, in roughly decreasing order of how often it bites HFT:
+Timer tick interrupt (the 1000Hz / 250Hz scheduling clock) → SMI (System Management Interrupt, firmware-level, invisible to OS) → IRQ delivery to your core (other devices' interrupts routed to your CPU) → page faults (minor and major) → TLB shootdowns (cross-core IPI to invalidate TLB entries) → C-state transitions (CPU going to sleep between bursts) → cache pollution from neighboring hyperthread.
+
+For each, you need three things: mechanism (one sentence), detection command (one command), fix (one or two sentences). That's the interview answer shape.
+
+Sources: there is no single canonical text for this — it's accumulated tribal knowledge. The best consolidation I've seen is Erik Rigtorp's blog ("Low Latency Tuning Guide" — read the whole thing, it's short and brutal). For SMIs specifically: the Red Hat "Realtime Tuning Guide" and the turbostat tool docs. For the timer tick and nohz_full: Frederic Weisbecker's LWN articles. For TLB shootdowns: there's an excellent Cloudflare blog post titled "How to receive a million packets per second" that touches it indirectly, but the cleanest treatment is the kernel documentation on mm/tlb.c plus a quick read of what MADV_DONTNEED triggers.
+Deliverable: a markdown table with seven rows (the seven noise sources), four columns (mechanism, detection command, fix, typical magnitude in µs). Keep it on one screen. This is the table you reference in interviews.
+
+Block C — What kernel bypass actually does. (~1–2 hours, only after A and B are solid)
+This is small but load-bearing. Once Block A is internalized, kernel bypass is a one-page idea: the NIC DMAs into userspace-mapped memory, the application polls the ring buffer directly, the entire bottom half of the kernel stack (interrupt → softirq → sk_buff → protocol stack → socket queue → copy) is removed. Your recv() becomes a memory read.
+What it removes: everything from "hardware interrupt" down to "kernel→user copy" in Block A. What it does not remove: everything in Block B. That's the entire Part B answer from the original diagnostic.
+Source: read the OpenOnload Implementation white paper (the 2008 USENIX one by Steven Pope and David Riddoch) for the historical-canonical version. Then skim the current Xilinx/Solarflare OpenOnload user guide for the production reality. Do not read these before A and B — you'll memorize jargon without intuition.
+Deliverable: one paragraph, written in interview-answer structure (essence-mechanism-point), titled "What kernel bypass removes and what it doesn't." This is the answer to the Part B question you couldn't answer cold.
+
+Block D — Diagnostic instrument map. (~1 hour, last)
+This is a lookup table, not a study topic. One column: the layer (NIC, ring buffer, softirq, sk_buff, socket queue, application). Second column: the instrument that reads that layer's counter (ethtool -S, /proc/interrupts, /proc/net/softnet_stat, slabtop, ss -unmp, your own HdrHistogram). Third column: what a healthy reading looks like.
+
+You only build this after A and B are in place, because otherwise the column names will be vocabulary, not anchors. Source: man pages plus your own UDP echo experiments — run each command against your running server and note what changes when you generate load.
+Deliverable: the table itself, in your repo as diagnostic_instruments.md.
+
+Sequencing across the two days you've allocated:
+Day 2 morning (3–4 hrs): Block A. Damato article + diagram. End of morning: you should be able to recite the path in 90 seconds.
+Day 2 afternoon (2–3 hrs): Block B. Rigtorp + supplementary reads. End of afternoon: the seven-row table is in your repo.
+Day 3 morning (1–2 hrs): Block C. OpenOnload paper. End of morning: the one-paragraph kernel-bypass answer is in your repo.
+Day 3 afternoon (1 hr): Block D. Table built. Then run all three Slot 5 articulation questions cold, recorded, no iteration. Those recordings are your week-1 fluency baseline.
+

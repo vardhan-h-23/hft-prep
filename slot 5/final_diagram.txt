@@ -1,0 +1,417 @@
+##### Block A #####
+
+standard case:
+NIC 
+DMA engine -> RAM
+NIC (MSI-X) -> CPU 
+CORE read -> (normal mode, NAPI) 
+sk_buff -> L3 (network layer) -> L4(network layer) -> recv() syscall
+
+NIC 
+PHY (light singals converted into the digital bytes)
+MAC (framing, addressing,error checking is done)
+DMA engine (direct memory access) copy the bytes into the RX buffers (suggested by RSS) in RAM via 
+PCIe (Peripheral Component Interconnect Express): connect NIC->RAM->CPU
+
+RSS : (Indirection table mapping of [hash --> Rx queue] boot up in the SRAM of NIC during OS boot)
+
+Now 
+About RX buffers: 
+1. NIC drivers wake up -> asks the kernel's memory management for 
+chunk of RAM to use for the ring buffer physically contiguous and pinned. dma_alloc_coherent
+2. Rx buffer (lockless queues) is just array of descriptors (are of size of cache line)
+3. Descriptors vs. Packet Buffers: Descriptors (plates)  Packet Buffers (food on the plates)
+
+MSI-X mechanism:
+As descriptor flag is flipped
+NIC ('Event controller' trigger a specific IRQ signal to address of APIC)
+Event controller (can use Interrupt Coalescing)
+
+'IRQ signal' and 'IRQ Routing':
+MSI-x vector is just an Id number which is shouted by the NIC to the whole mother board 
+message is like 'Fire Vector 3' 
+Linux maintains a routing map [Ex. Vector 2 -> Core 3](managed via smp_affinity) 
+
+core to ISR (Interrupt Service Routine) code:
+Core do context switch -> switch (user to kernel mode) 
+-> use vector id to find code registered in Interrupt Descriptor Table
+-> Table at index 3 points to memory address of the NIC driver's ISR
+
+'ISR': (without NAPI)
+-> Send Acknowledgment through PCIe about 'I received your interrupt'
+-> Read Ring Buffer -> ask kernel's memory allocator for a new sk_buff envelope
+-> It maps the raw packet data into this sk_buff
+-> sk_buff pushed directly to kernel's protocol processing layers
+-> driver allocates a new empty memory buffer
+-> creates a new descriptor pointing to it  (sets the flag back to "NIC's Turn,")
+-> The ISR finishes.
+
+'ISR': (with NAPI)
+-> while executing the ISR (Top-Half) its decided whether to activate NAPI or not
+-> (Interrupt Masking) send PCIe msg to NIC that 'don't interrupt on specific Rx queue untill I tell you' 
+-> calls the kernel function napi_schedule() which links NIC (corresponding RX queue) to local per-CPU polling list 
+-> raised a software interrupt flag (NET_RX_SOFTIRQ) which signifies that "we have networking polling work to do"
+-> Exiting the Hardware Interrupt and enter in Bottom-Half
+-> executes the napi_poll() function, entering a while loop
+-> Draining the Ring Buffer (Polling)
+-> napi_poll() loop continue untill 'Buffer is Empty' or 'Budget Exhausted'
+-> if budget exceeded, ksoftirqd background thread takes over
+
+
+
+Protocol Processing (L3/L4):
+-> Kernel shifts data pointer to decapsulate headers
+-> Validates routing and IP checksum 
+-> UDP: Validates destination port and pseudo-header
+
+
+Socket Receive Queue:
+-> Kernel identifies the specific application socket bound to the UDP port.
+-> Appends the sk_buff to a linked list.
+-> SO_RCVBUF dictates if the packet is queued safely or dropped.
+
+
+recv() Syscall & User Copy:
+-> C++ application executes recv(), forcing a system Context Switch
+-> CPU physically copies bytes from Kernel RAM to User Space char* buffer
+-> Kernel decrements sk_buff ref count and destroys it
+
+
+
+Timings:
+DMA Engine & Ring Buffer -> ~200 - 500 ns
+Hardware Interrupt & IRQ Routing -> 1.5 - 3 µs
+NAPI & Softirq -> 2 - 5 µs
+sk_buff Allocation -> 1 - 2 µs
+Protocol Processing (L3/L4) -> 1 - 3 µs
+Socket Receive Queue -> 500 ns
+recv() Syscall & User Copy -> 1.5 - 3 µs
+
+
+
+
+
+
+##### Block B #####
+OS jitter is majore issue, a process interrupted to make core do housekeeping tasks like:
+
+### Timer tick interrupt: (3us)
+CONFIG_HZ: config set indicates how many times core get interrupted for timer tick
+Local APIC: It acts as a metronome, counting down at a hardware level.
+
+End to End flow :
+1. Local APIC hit timer 0 -> it trigger (IRQ 0) -> Context switching privilege level user(ring 3) to kernel (ring 0) -> 
+
+2. in timer ISR performe tasks like
+update time: it increments jiffies
+RCU callback : executes pending Read-Copy-Update operations
+Accounting: check for how long your user application is running to update the stats
+The scheduler: if kernel application crossed alloted limit 'timeslice' it schedule a diff process/application on that core
+
+3. once kernel done with this it perform IRET (Interrupt Return)
+Action: changes privilege from ring 0 to ring 3.
+
+Detection:
+Its done by the 
+sudo taskset -c 4 perf stat -a -C 4 \\n  -e irq_vectors:local_timer_entry \\n  -e irq_vectors:local_timer_exit \\n  -e cs \\n  -e cpu-migrations \\n  -- ./server
+
+Fix:
+isolcpus-> by this OS don't schedule any random process on that cpu, reserving cores for trading processed 
+nohz_full (tickless kernel)-> it shuts off the timer config_hz running on the core and (The hardware APIC is silenced. The CPU stays in User Space (Ring 3) indefinitely. Zero OS Jitter from the scheduling clock.)
+
+### SMI (System Management Interrupt, firmware-level, invisible to OS): (50us)
+every few hours mysteriously gap b/w arrived timestamp and till reached processes  
+gap is 50us instead of 800ns a huge jump; (OS logs no context)
+
+1. SMI (system management interrupt)
+2. SMM (system management mode) (Ring 2)
+3. SMRAM (Dedicated locked region of physical memory which contains motherboards firmware code)
+4. BMC 
+
+why trigger?
+1. Fan speed below threashold 
+2. CPU temperature crosses thermal Boundary
+3. ECC (error correcting code) detects flipped bit
+4. legacy USB emulation routine fires (faltu)
+
+
+As CPU received SMI it can't ignore it (its non maskable event)
+CPU transition into the SMM:
+-> instantly all the tasks running on  CPU cores (either on all or specific based on the architecture) locked in to SMRAM 
+-> It started executing the firmware code present in the SMRAM based on the condition ECC or cooling 
+-> during this time OS was suspended so it won't be able to update jiffies counter present on OS, it can't prevent SMI, it can't see SMI, it can't log that SMI occured
+-> CPU copies the systme state from the SMRAM back to the running state
+
+detection:
+MSR_SMI_COUNT
+```sudo apt install msr-tools
+sudo modprobe msr
+
+# Read SMI count on core 4 before your test
+sudo rdmsr -p 4 0x34
+
+# Run your workload, then read again
+sudo rdmsr -p 4 0x34
+# delta > 0 means SMIs fired
+
+BEFORE=$(sudo rdmsr -p 4 0x34)
+sudo taskset -c 4 ./server
+AFTER=$(sudo rdmsr -p 4 0x34)
+echo "SMI count delta: $((AFTER - BEFORE))"
+```
+
+
+
+sudo rdmsr -a 0x34
+sudo turbostat --msr 0x34
+smm_ptr
+
+
+Solution/FIX: (as can't be protected by OS)
+Disable hardware features in BIOS
+power management (C-states/P-states)
+thermal throttling 
+legacy USB support to remove the reasons an SMI would fire
+
+HFT firms often buy specialized servers with custom "HFT-optimized" BIOS profiles that explicitly strip out heavy motherboard/BMC polling routines to minimize SMM transitions
+
+
+
+### IRQ delivery to your core (other devices' interrupts routed to your CPU): (5 to 20 us)
+harware device whenever have data ready or finished task trigger the hardware interrupt then motherboard must decide which to cpu core we need to send this to handle.
+
+Peripheral device: Any harware outside cpu (NIC, NVMe SSD, USB controller)
+I/O APIC: routers for signals received from Peripheral devices
+Device driver ISR: specific piece of kernel code writtent to handle specific device 
+IRQ affinity (smp_affinity): A bitmask which tell the IOAPIC exactly which cores are allowed to get IRQ
+
+End to End:
+-> Signal trigger from hardware -> send to I/O APIC -> check the internal routing table created at booting time -> route to that 
+-> OS Acknowledes the disk write, update internal file system states, signal bg logging thread that write is complete 
+-> IRET transtion back to the user space ring 3
+-> Along with 20us loss we have L1 L2 trashed as well 
+
+Detection:
+watch -n 1 "awk '{ if (\$6 > 0 && \$1 ~ /^[0-9]+:/) print \"IRQ:\", \$1, \"Count:\", \$6, \"Device:\", \$NF }' /proc/interrupts"
+mpstat -I CPU -P 4 1 (table of every single interrupt type firing on Core 4 per second.)
+sudo perf record -e irq:irq_handler_entry -C 4 -a sleep 10 
+
+
+Solution/FIX:
+-> Modify the default mask of OS /proc/irq/default_smp_affinity 
+-> dedicated housekeeping core should be assigned 
+***-> The IRQs for the market data queues are pinned strictly to the specific cores assigned to process market data, keeping the order execution core entirely unbothered
+
+
+## page faults (minor and major) → TLB shootdowns (cross-core IPI to invalidate TLB)
+translation lookaside buffer
+
+orchestrated by LSU, MMU (memory management unit)
+-> it start with the instruction [MOV RAX, [address]] present in L1-I cache
+-> the know address in instruction is virtual so need to map to physical
+-> TLB contains direct mapping of virtual -> physical (L1D-TLB, L1I TLB, L2 S-TLB)
+-> Fast path (TLB and L1D cache) (~1ns)
+Simultaneously, the CPU checks the L1 D-Cache (typically 32KB). 
+Because L1 caches are often "Virtually Indexed, Physically Tagged" (VIPT)
+-> Slow Path (Page walk & cache heirarchy)
+OS divided RAM into page blocks(usually 4KB or Hugepage(2MB to 1GB))
+OS kernel maintains tree datastructure in RAM called page table
+
+PageWalk
+CPU reads special hardware register (CR3) which holds the physical address of very top of the Page Table.
+
+your Virtual Address as an index to read the Level 4 (PML4) table
+next part to read the Level 3 (PDP) table
+Level 2 (PD) table
+Level 1 (PT) table which yields the exact Physical Address.
+If not found (PAGE FAULT)
+MMU blindly walks them. Latency: ~10-20 nanoseconds
+
+After getting the physical address 
+Cache heirarchy
+L2-> 3-5ns
+L3-> 10-20ns
+RAM-> 60-100ns
+
+context switch as interrupt occur
+On page fault CPU switched from user space (Ring 3) to Kernel Spac (Ring 0) 
+to Page Fault Handler
+
+Minor Fault: we used malloc() or new to assign a memory space but lazy OS. 
+Didn't assign a physical address corresponding to the virtual address untill we touched it.
+Fix: OS grab a memory space update the Level 1 page table to point to it.
+Latency: ~1-3us
+
+
+Major Fault (Hard fault): (~10-50us)
+RAM is OOM and your addres is swapped out into the physical SSD, here core need to wait for the constant I/O so it will put your application to sleep untill the data return and then update the page table and wake up the application
+
+
+TLB shootdown: (15)
+OS contantly modifies page tables [when concurrent process frees the memory or during memmory compactin]
+
+Cross core invalidation:
+imagine if core 0 ask OS to unmap a block of memory, and OS updates the Page Table in map;
+Danger: core 1's hardware TLB might have old translation cached! cache1 could read and write the memory it no longer owns
+The OS Kernel running on Core 0 must forcefully pause Core 1.
+Core 0 sends an IPI (Inter-Processor Interrupt) across the motherboard directly to Core 1.
+Core 1 drops whatever it is doing, jumps into the Kernel, flushes its local TLB to destroy the stale entry, sends an acknowledgment back to Core 0, and resumes
+
+This is a TLB Shootdown.
+
+Detection:
+sudo perf stat -e faults,minor-faults,major-faults
+ps -o pid,comm,min_flt,maj_flt -p $(pgrep -x server)
+watch -n 1 "awk '/TLB/ {print \$1, \"Core 4:\", \$6}' /proc/interrupts"
+sudo perf record -e tlb:tlb_flush -C 4 -a sleep 10
+
+The Fix: Pre-allocation and Huge Pages
+Ban new and delete on the Critical Path
+default_hugepagesz=1G hugepagesz=1G hugepages=4
+Open GRUB (/etc/default/grub) and append this to your GRUB_CMDLINE_LINUX_DEFAULT:
+
+
+philosophy:
+CPU core has no immediate work to do, power it down
+
+Market data arrives in microscopic bursts separated by milliseconds of dead silence
+C0 - The active state. The core is awake, voltage is high, clocks are ticking, instructions are executing.
+C1/C1E - light sleep, core stops executing instruction clock stop, but L1/l2 retained
+C3 - (Deep Sleep) L1/L2 cached out to shared L3 and turned off more clock generators 
+C6/C7 - The core's voltage drops to near zero. It effectively powers off.
+
+Exit latency (wake up panelty):
+Time it takes hardware to ramp voltage up, stablize clock frequencies, repopulate cache before it can execute the very first instruction
+
+Solution:
+BIOS/UEFI Level: disable C-States, C1E support, and advanced power management. You force the hardware into "Maximum Performance" mode
+OS Kernel Boot Parameters: 
+processor.max_cstate=1
+intel_idle.max_cstate=0
+idle=poll
+
+Detection:
+sudo turbostat -c 4 --interval 1
+CPU is truly locked awake (C0 state), the %c columns should all be exactly 0.00, and the Avg_MHz should be locked to your CPU's maximum boost clock
+
+sudo perf record -e power:cpu_idle -C 4 -a sleep 10
+state=4294967295 means the CPU woke up (exited idle). Any other state number (like state=1 or state=2) means it went to sleep
+
+Application level: Don't use sleep(), mutex.lock(), or epoll_wait()
+instead use while(true)
+
+cache pollution from neighboring hyperthread
+Logical CPU 2 and Logical CPU 18 are hyperthread siblings sharing Physical Core 2.
+Core 2 running market data or trading logic and core 18 wakes up and starts parsing a massive block of JSON text
+L1 Cache is only 32KB, and the Python script just asked for 50KB of JSON
+hardware cache controller strictly follows its eviction algorithm LRU etc. and flush down the order book data placed in L1 
+Panelty; then ~1ns to ~10ns 
+
+Detection:
+cat /sys/devices/system/cpu/cpu4/topology/thread_siblings_list
+
+sudo perf stat -e L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses -C 4 sleep 10
+Look at the ratio of L1-dcache-load-misses to loads. In a tightly written, cache-warmed C++ engine, 
+your L1 hit rate should be exceptionally high
+But if millions of L1 misses but very few Last Level Cache (LLC/L3) misses,
+it means the data is being pushed out of the local L1 cache by a noisy neighbor
+
+sudo perf c2c record -C 4 sleep 10
+sudo perf c2c report
+
+BIOS Level (The Nuclear Option):
+OS Level (isolcpus isolation):
+
+Solution:
+enter the BIOS, and completely disable SMT/Hyperthreading
+
+
+
+
+
+
+
+#### Block C 
+
+
+C1. In your Block A notes, which steps in the kernel receive path are the most expensive? (Answer from your own timing table — you already have this.)
+
+basically this part took the latency to the micro seconds
+Hardware Interrupt & IRQ Routing -> 1.5 - 3 µs
+NAPI & Softirq -> 2 - 5 µs
+sk_buff Allocation -> 1 - 2 µs
+Protocol Processing (L3/L4) -> 1 - 3 µs
+
+
+
+C2. What does OpenOnload actually do? Not "bypasses the kernel" — specifically, what mechanism does it use? (Answer: it provides a userspace shared library that intercepts socket syscalls and redirects them through a userspace TCP/UDP stack. Under the hood it uses ef_vi to DMA packets directly into userspace-mapped memory. Your application calls recv() normally — Onload's LD_PRELOAD intercept catches it and reads from the userspace ring buffer instead of entering the kernel.)
+
+
+1. Application Injection (LD_PRELOAD)OpenOnload forces the operating system to load OpenOnload’s custom userspace shared library into your application’s memory space before the standard C library (glibc)
+
+2. Syscall Interception Because the Onload library is loaded first,
+it hooks, intercepts and replace networking system calls with own network stack 
+so when recv() called it never do context switch into kernel instead library caches function and serve is directly from userspace.
+
+3. Direct Memory Mapping (The Hardware Bridge) 
+Solarflare NIC driver allocates memory for packet buffers and maps that memory space directly into your application's virtual address space
+
+For the intercepted calls to actually read data, the hardware must be able to talk to userspace. During initialization, the Solarflare NIC driver allocates memory for packet buffers and maps that memory space directly into your application's virtual address space.
+
+4. DMA via ef_vi Under the hood, Onload relies on ef_vi, Solarflare’s lowest-level Virtual Interface API. The NIC is programmed to use Direct Memory Access (DMA) to push incoming network packets directly across the PCIe bus and into the userspace ring buffers created in Step 3. The kernel's network stack, interrupt handlers, and packet copying mechanisms are completely cut out of the data path.
+
+5. Userspace Protocol Processing When your intercepted recv() call executes, Onload's custom TCP/UDP stack simply polls that userspace ring buffer. It handles all the complex protocol logic — TCP state machines, acknowledgments, reassembly, and checksums — right there in the application thread. It then hands the payload back to your application just as a standard recv() would.
+
+6. The Kernel FallbackOpenOnload is a hybrid stack. If your application makes a socket call that isn't destined for the accelerated Solarflare interface (like an SSH connection, or routing to a management subnet), the Onload library acts as a passthrough. It hands the syscall back to the standard Linux kernel to be processed normally, ensuring you don't lose standard OS networking capabilities.
+
+C3. Looking at your Block A diagram, draw a line through every box that OpenOnload removes. What's left? (Answer: hardware interrupt gone, softirq gone, sk_buff allocation gone, protocol processing moved to userspace, kernel→user copy gone. What's left: NIC PHY/MAC, DMA engine, PCIe bus — and everything in Block B, which is the noise sources.)
+
+DMA Engine & PCIe and other stuff is either completely gone or shifted to the userspace mode.
+
+
+C4. Where does ef_vi sit relative to OpenOnload? Where does TCPDirect sit? (Answer: ef_vi is the raw Layer 2 API — direct NIC access, no protocol stack, you build everything yourself. OpenOnload sits on top of ef_vi and gives you a full TCP/UDP stack with BSD socket compatibility. TCPDirect sits between them — lower latency than Onload, simpler than ef_vi, but requires API changes in your application.)
+
+
+The Kernel Bypass Stack Hierarchy
+1. ef_vi (The Foundation)
+
+Position: The absolute bottom of the user-space stack, interfacing directly with the NIC's DMA engine and queues.
+
+What it is: The raw Layer 2 API.
+
+The Trade-off: It provides the absolute lowest latency and highest message rate physically possible on the hardware. However, it offers zero protocol support. There is no IP routing, no TCP state machine, and no UDP header parsing. You are simply passing raw Ethernet frames back and forth, meaning you have to build the entire protocol stack yourself.
+
+2. TCPDirect (The Middle Ground)
+
+Position: Sits immediately above ef_vi, acting as a custom transport layer.
+
+What it is: A highly optimized, user-space TCP and UDP stack.
+
+The Trade-off: TCPDirect strips away the overhead of trying to emulate standard operating system behaviors. It gives you lower latency and better predictability than OpenOnload, but it sacrifices compatibility. You cannot just drop it into an existing system; it requires proprietary API changes, meaning your application code must be explicitly rewritten to talk to TCPDirect.
+
+3. OpenOnload (The Application Wrapper)
+
+Position: Sits at the top of the user-space stack, bridging the gap between high-performance hardware (like ef_vi) and standard software interfaces.
+
+What it is: A full user-space TCP/IP stack coupled with complete POSIX / BSD socket compatibility.
+
+The Trade-off: It is designed for zero-code-change deployment. Your application can still execute standard recv(), send(), and epoll() calls, and OpenOnload intercepts them (usually via LD_PRELOAD) to bypass the kernel. It sacrifices a small amount of latency to maintain this standard interface, making it slightly slower than TCPDirect, but massively easier to deploy.
+
+C5. Why does kernel bypass not fully isolate you from the kernel? Give two specific examples. (Answer from Block B: timer tick interrupts still fire on your core unless nohz_full is set, TLB shootdowns from other processes still send IPIs to your core. Plus: memory management — page faults, huge page allocation — still goes through the kernel. Your process is still a Linux process.)
+
+
+C6. Write the interview answer. One paragraph, essence-mechanism-point structure: "What does kernel bypass remove and what doesn't it remove?"
+
+
+It remove all the network layer operations present on the OS kernel starting from 
+MSI-x, IRQ, ISR,napi, sk_buff copying, Protocol processing, but it failed to remove OS jitters Timer tick interrupt, SMI, Page fault, TLB miss, TLB shootdown etc. 
+During booting of the program onload library intercept all the network syscall functions and replace them with own network callstack, it create Rx queues in the userspace. its basically build over ef_vi and direct DMA engine to drop the bytes into its RX qeueues present in userspace, later it process bytes with highly optimized TCP, UDP stack with TCP Direct and deliver it to recv endpoint in the application layer.
+It help us reduce a lot of latency in the network path but we still face the OS jitter or there are still lot of random OS interruptions present which have to be handled to imrove the reliability in Trading systems.
+
+
+it replace the OS/kernels network callstack with its own network stack. but it doesn't remove OS jitters and interruptions present.
+Starting from MSI-x, IRQ, ISR,napi, sk_buff copying, Protocol processing it remove all of them and directly put data in to Rx buffer present in the userspace  via DMA engine, then process bytes like validates routing and IP checksum like TCP/IP and deliver them to recv endpoint all in userspace. 
+I helps us to reduce a lot of latency in the network path but we still need to deal with timer tick interrupt, SMI, page fault, TLB shootdown by isolcpus, nohz_full, disbaling hardware features in bios,  hugepages etc. to avoid random latency spikes
+
+
+Starting from MIS-X IRQ, ISR  

@@ -1,0 +1,89 @@
+##### Block A #####
+
+standard case:
+NIC 
+DMA engine -> RAM
+NIC (MSI-X) -> CPU 
+CORE read -> (normal mode, NAPI) 
+sk_buff -> L3 (network layer) -> L4(network layer) -> recv() syscall
+
+NIC 
+PHY (light singals converted into the digital bytes)
+MAC (framing, addressing,error checking is done)
+DMA engine (direct memory access) copy the bytes into the RX buffers (suggested by RSS) in RAM via 
+PCIe (Peripheral Component Interconnect Express): connect NIC->RAM->CPU
+
+RSS : (Indirection table mapping of [hash --> Rx queue] boot up in the SRAM of NIC during OS boot)
+
+Now 
+About RX buffers: 
+1. NIC drivers wake up -> asks the kernel's memory management for 
+chunk of RAM to use for the ring buffer physically contiguous and pinned. dma_alloc_coherent
+2. Rx buffer (lockless queues) is just array of descriptors (are of size of cache line)
+3. Descriptors vs. Packet Buffers: Descriptors (plates)  Packet Buffers (food on the plates)
+
+MSI-X mechanism:
+As descriptor flag is flipped
+NIC ('Event controller' trigger a specific IRQ signal to address of APIC)
+Event controller (can use Interrupt Coalescing)
+
+'IRQ signal' and 'IRQ Routing':
+MSI-x vector is just an Id number which is shouted by the NIC to the whole mother board 
+message is like 'Fire Vector 3' 
+Linux maintains a routing map [Ex. Vector 2 -> Core 3](managed via smp_affinity) 
+
+core to ISR (Interrupt Service Routine) code:
+Core do context switch -> switch (user to kernel mode) 
+-> use vector id to find code registered in Interrupt Descriptor Table
+-> Table at index 3 points to memory address of the NIC driver's ISR
+
+'ISR': (without NAPI)
+-> Send Acknowledgment through PCIe about 'I received your interrupt'
+-> Read Ring Buffer -> ask kernel's memory allocator for a new sk_buff envelope
+-> It maps the raw packet data into this sk_buff
+-> sk_buff pushed directly to kernel's protocol processing layers
+-> driver allocates a new empty memory buffer
+-> creates a new descriptor pointing to it  (sets the flag back to "NIC's Turn,")
+-> The ISR finishes.
+
+'ISR': (with NAPI)
+-> while executing the ISR (Top-Half) its decided whether to activate NAPI or not
+-> (Interrupt Masking) send PCIe msg to NIC that 'don't interrupt on specific Rx queue untill I tell you' 
+-> calls the kernel function napi_schedule() which links NIC (corresponding RX queue) to local per-CPU polling list 
+-> raised a software interrupt flag (NET_RX_SOFTIRQ) which signifies that "we have networking polling work to do"
+-> Exiting the Hardware Interrupt and enter in Bottom-Half
+-> executes the napi_poll() function, entering a while loop
+-> Draining the Ring Buffer (Polling)
+-> napi_poll() loop continue untill 'Buffer is Empty' or 'Budget Exhausted'
+-> if budget exceeded, ksoftirqd background thread takes over
+
+
+
+Protocol Processing (L3/L4):
+-> Kernel shifts data pointer to decapsulate headers
+-> Validates routing and IP checksum 
+-> UDP: Validates destination port and pseudo-header
+
+
+Socket Receive Queue:
+-> Kernel identifies the specific application socket bound to the UDP port.
+-> Appends the sk_buff to a linked list.
+-> SO_RCVBUF dictates if the packet is queued safely or dropped.
+
+
+recv() Syscall & User Copy:
+-> C++ application executes recv(), forcing a system Context Switch
+-> CPU physically copies bytes from Kernel RAM to User Space char* buffer
+-> Kernel decrements sk_buff ref count and destroys it
+
+
+
+Timings:
+DMA Engine & Ring Buffer -> ~200 - 500 ns
+Hardware Interrupt & IRQ Routing -> 1.5 - 3 µs
+NAPI & Softirq -> 2 - 5 µs
+sk_buff Allocation -> 1 - 2 µs
+Protocol Processing (L3/L4) -> 1 - 3 µs
+Socket Receive Queue -> 500 ns
+recv() Syscall & User Copy -> 1.5 - 3 µs
+
